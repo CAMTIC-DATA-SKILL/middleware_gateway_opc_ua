@@ -9,7 +9,7 @@ from asyncua import Client, Node, ua
 from asyncua.common.subscription import Subscription
 
 from config import OpcUaConfig, config
-from core.client.opc_ua.handler import DataChangeCallback, SubscriptionHandler
+from core.opc_ua.client.handler import DataChangeCallback, SubscriptionHandler
 from utils.log_setup import get_logger
 
 logger = get_logger(__name__)

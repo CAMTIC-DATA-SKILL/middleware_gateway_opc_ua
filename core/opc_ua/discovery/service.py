@@ -6,16 +6,17 @@ from dataclasses import dataclass, field
 from asyncua import ua
 
 from config import OpcUaConfig
-from core.catalog import (
+from core.opc_ua.catalog import (
     Catalog,
     CatalogTag,
     CollectionSpec,
+    EuRange,
     SourceSpec,
     TagStatus,
     TargetSpec,
 )
-from core.client.opc_ua import OpcUaClient
-from core.discovery.browser import AddressSpaceBrowser, DiscoveredVariable
+from core.opc_ua.client import OpcUaClient
+from core.opc_ua.discovery.browser import AddressSpaceBrowser, DiscoveredVariable
 from utils.log_setup import get_logger
 
 logger = get_logger(__name__)
@@ -132,6 +133,7 @@ class DiscoveryService:
                 name=variable.browse_path[-1],
                 data_type=variable.data_type,
                 unit=variable.unit,
+                eu_range=EuRange(*variable.eu_range) if variable.eu_range else None,
             ),
             collection=CollectionSpec(
                 sampling_interval_ms=self._cfg.sampling_interval_ms,

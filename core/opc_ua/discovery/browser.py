@@ -15,6 +15,7 @@ READ_CHUNK_SIZE = 500
 _OBJECTS_FOLDER = ua.NodeId(ua.ObjectIds.ObjectsFolder)
 _HAS_PROPERTY = ua.NodeId(ua.ObjectIds.HasProperty)
 _ENGINEERING_UNITS = ua.QualifiedName("EngineeringUnits", 0)
+_EU_RANGE = ua.QualifiedName("EURange", 0)
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class DiscoveredVariable:
     description: str
     data_type: str
     unit: str
+    eu_range: tuple[float, float] | None
 
 
 @dataclass
@@ -44,6 +46,7 @@ class _Pending:
     depth: int
     display_name: str = ""
     eu_node: ua.NodeId | None = field(default=None)
+    eu_range_node: ua.NodeId | None = field(default=None)
 
 
 def _chunks(items: Sequence, size: int) -> Iterator[Sequence]:
@@ -99,8 +102,11 @@ class AddressSpaceBrowser:
                         continue
 
                     if ref.ReferenceTypeId == _HAS_PROPERTY:
-                        if parent.node_class == ua.NodeClass.Variable and ref.BrowseName == _ENGINEERING_UNITS:
-                            parent.eu_node = child_id
+                        if parent.node_class == ua.NodeClass.Variable:
+                            if ref.BrowseName == _ENGINEERING_UNITS:
+                                parent.eu_node = child_id
+                            elif ref.BrowseName == _EU_RANGE:
+                                parent.eu_range_node = child_id
                         continue
 
                     if child_id in visited:
@@ -234,6 +240,7 @@ class AddressSpaceBrowser:
         descriptions = await self._read_many(node_ids, ua.AttributeIds.Description)
         type_names = await self._resolve_type_names([t for t in data_type_ids if isinstance(t, ua.NodeId)])
         units = await self._read_units([p.eu_node for p in pending if p.eu_node is not None])
+        ranges = await self._read_ranges([p.eu_range_node for p in pending if p.eu_range_node is not None])
 
         variables = []
         for item, data_type_id, description in zip(pending, data_type_ids, descriptions):
@@ -247,6 +254,7 @@ class AddressSpaceBrowser:
                     description=description.Text if isinstance(description, ua.LocalizedText) and description.Text else "",
                     data_type=type_names.get(data_type_id, "") if isinstance(data_type_id, ua.NodeId) else "",
                     unit=units.get(item.eu_node, "") if item.eu_node is not None else "",
+                    eu_range=ranges.get(item.eu_range_node) if item.eu_range_node is not None else None,
                 )
             )
         return variables
@@ -270,3 +278,10 @@ class AddressSpaceBrowser:
             if isinstance(value, ua.EUInformation) and value.DisplayName and value.DisplayName.Text:
                 units[eu_node] = value.DisplayName.Text
         return units
+
+    async def _read_ranges(self, range_nodes: list[ua.NodeId]) -> dict[ua.NodeId, tuple[float, float]]:
+        ranges: dict[ua.NodeId, tuple[float, float]] = {}
+        for range_node, value in zip(range_nodes, await self._read_many(range_nodes, ua.AttributeIds.Value)):
+            if isinstance(value, ua.Range) and value.Low < value.High:
+                ranges[range_node] = (value.Low, value.High)
+        return ranges

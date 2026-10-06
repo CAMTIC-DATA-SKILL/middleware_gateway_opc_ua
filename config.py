@@ -116,11 +116,22 @@ class OpcUaConfig:
 
 
 @dataclass(frozen=True)
+class NorthboundConfig:
+    """상위 시스템에 데이터를 제공하는 게이트웨이 자체 OPC UA 서버 설정."""
+
+    endpoint: str
+    server_name: str
+    application_uri: str
+    namespace_uri: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     base_dir: Path
     log_level: str
     catalog_path: Path
     opcua: OpcUaConfig
+    northbound: NorthboundConfig
 
 
 def load_config() -> AppConfig:
@@ -158,6 +169,12 @@ def load_config() -> AppConfig:
         log_level=_get_str("LOG_LEVEL", "INFO").upper(),
         catalog_path=_get_path("CATALOG_PATH") or BASE_DIR / "catalog" / "tags.yaml",
         opcua=opcua,
+        northbound=NorthboundConfig(
+            endpoint=_get_str("NORTHBOUND_ENDPOINT", "opc.tcp://0.0.0.0:4841/gateway/"),
+            server_name=_get_str("NORTHBOUND_SERVER_NAME", "middleware_gateway_opc_ua"),
+            application_uri=_get_str("NORTHBOUND_APPLICATION_URI", "urn:middleware:gateway:opcua:server"),
+            namespace_uri=_get_str("NORTHBOUND_NAMESPACE_URI", "urn:middleware:gateway:opcua:tags"),
+        ),
     )
 
 

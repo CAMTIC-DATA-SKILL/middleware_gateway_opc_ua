@@ -5,6 +5,10 @@ from enum import Enum
 from typing import Any
 
 
+class CatalogError(ValueError):
+    pass
+
+
 class TagStatus(str, Enum):
     CANDIDATE = "candidate"
     APPROVED = "approved"
@@ -27,11 +31,30 @@ class SourceSpec:
 
 
 @dataclass
+class EuRange:
+    """정상 운전 시 값이 움직이는 범위. 상위 시스템의 트렌드 축, 게이지 범위 등에 쓰인다."""
+
+    low: float
+    high: float
+
+
+@dataclass
 class TargetSpec:
     path: str
     name: str
     data_type: str = ""
     unit: str = ""
+    eu_range: EuRange | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TargetSpec:
+        eu_range = data.get("eu_range")
+        return cls(**{**data, "eu_range": EuRange(**eu_range) if eu_range else None})
+
+    @property
+    def segments(self) -> tuple[str, ...]:
+        """`a//b/` 같은 표기도 `a/b` 와 같은 경로로 취급한다."""
+        return tuple(segment for segment in self.path.split("/") if segment)
 
 
 @dataclass
@@ -68,7 +91,7 @@ class CatalogTag:
             enabled=bool(data.get("enabled", False)),
             status=TagStatus(data.get("status", TagStatus.CANDIDATE.value)),
             source=SourceSpec(**data["source"]),
-            target=TargetSpec(**data["target"]),
+            target=TargetSpec.from_dict(data["target"]),
             collection=CollectionSpec(**(data.get("collection") or {})),
             conversion=ConversionSpec(**(data.get("conversion") or {})),
         )
@@ -93,12 +116,19 @@ class Catalog:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Catalog:
-        tags = [CatalogTag.from_dict(item) for item in data.get("tags") or []]
+        tags: list[CatalogTag] = []
         seen: set[str] = set()
-        for tag in tags:
+        for index, item in enumerate(data.get("tags") or [], start=1):
+            try:
+                tag = CatalogTag.from_dict(item)
+            except (KeyError, TypeError, ValueError) as e:
+                tag_id = item.get("tag_id", "?") if isinstance(item, dict) else "?"
+                reason = f"필수 항목 {e} 이(가) 없습니다." if isinstance(e, KeyError) else str(e)
+                raise CatalogError(f"{index}번째 태그({tag_id})를 읽을 수 없습니다: {reason}") from e
             if tag.tag_id in seen:
-                raise ValueError(f"카탈로그에 중복된 tag_id 가 있습니다: {tag.tag_id}")
+                raise CatalogError(f"카탈로그에 중복된 tag_id 가 있습니다: {tag.tag_id}")
             seen.add(tag.tag_id)
+            tags.append(tag)
         return cls(tags=tags)
 
     def to_dict(self) -> dict[str, Any]:

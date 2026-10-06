@@ -20,6 +20,8 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
 
 _LIBRARY_LEVELS = {
     "asyncua": logging.WARNING,
+    # 표준 타입(AnalogItemType 등) 인스턴스 생성 시 타입 노드에 없는 속성마다 남기는 경고를 숨긴다.
+    "asyncua.common.copy_node_util": logging.ERROR,
 }
 
 _configured = False

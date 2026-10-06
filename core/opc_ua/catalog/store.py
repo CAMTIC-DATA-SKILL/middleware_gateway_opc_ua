@@ -5,15 +5,20 @@ from pathlib import Path
 
 import yaml
 
-from core.catalog.model import Catalog
+from core.opc_ua.catalog.model import Catalog, CatalogError
 
 
 def load_catalog(path: Path) -> Catalog:
     """파일이 없으면 빈 카탈로그를 반환한다."""
     if not path.exists():
         return Catalog()
-    with path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        raise CatalogError(f"YAML 형식 오류 ({path}): {e}") from e
+    if not isinstance(data, dict):
+        raise CatalogError(f"카탈로그 최상위는 `tags:` 항목이어야 합니다: {path}")
     return Catalog.from_dict(data)
 
 

@@ -5,9 +5,10 @@ from pathlib import Path
 from asyncua import ua
 
 from config import config
-from core.catalog import load_catalog, save_catalog
-from core.client.opc_ua import DataChange, OpcUaClient
-from core.discovery import DiscoveryService, log_report
+from core.opc_ua.catalog import CatalogError, load_catalog, log_validation, save_catalog, validate_catalog
+from core.opc_ua.client import DataChange, OpcUaClient
+from core.opc_ua.discovery import DiscoveryService, log_report
+from core.opc_ua.server import OpcUaServer
 from utils.log_setup import get_logger, setup_logging
 
 logger = get_logger("main")
@@ -23,7 +24,8 @@ async def on_data_change(change: DataChange) -> None:
     )
 
 
-async def run() -> None:
+async def run_client(args: argparse.Namespace) -> None:
+    logger.info("현장 서버 접속: %s", config.opcua.endpoint)
     async with OpcUaClient() as client:
         node_ids = config.opcua.node_ids
 
@@ -40,10 +42,29 @@ async def run() -> None:
         await asyncio.Event().wait()
 
 
-async def discover(args: argparse.Namespace) -> None:
+async def run_server(args: argparse.Namespace) -> None:
+    catalog = load_catalog(args.catalog)
+    logger.info("카탈로그 로드: %s (전체 %d개)", args.catalog, len(catalog.tags))
+    async with OpcUaServer(catalog):
+        await asyncio.Event().wait()
+
+
+async def run_validate(args: argparse.Namespace) -> int:
+    if not args.catalog.exists():
+        logger.error("카탈로그 파일이 없습니다: %s", args.catalog)
+        return 1
+    catalog = load_catalog(args.catalog)
+    logger.info("카탈로그 로드: %s (전체 %d개)", args.catalog, len(catalog.tags))
+    result = validate_catalog(catalog)
+    log_validation(result)
+    return 1 if result.errors else 0
+
+
+async def run_discover(args: argparse.Namespace) -> None:
     catalog_path: Path = args.output
     catalog = load_catalog(catalog_path)
 
+    logger.info("현장 서버 접속: %s", config.opcua.endpoint)
     async with OpcUaClient() as client:
         try:
             report = await DiscoveryService(client, config.opcua).discover(
@@ -75,11 +96,22 @@ def _node_id(text: str) -> ua.NodeId:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="OPC-UA middleware gateway")
-    commands = parser.add_subparsers(dest="command")
+    commands = parser.add_subparsers(dest="command", required=True, metavar="{client,server,discover,validate}")
 
-    commands.add_parser("run", help="게이트웨이 실행 (기본값)")
+    client_parser = commands.add_parser("client", help="OPC UA 클라이언트: 현장 서버에 접속해 데이터를 구독")
+    client_parser.set_defaults(handler=run_client)
+
+    server_parser = commands.add_parser("server", help="OPC UA 서버: 카탈로그 기반으로 상위 시스템에 데이터를 제공")
+    server_parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=config.catalog_path,
+        help=f"카탈로그 파일 경로 (기본값: {config.catalog_path})",
+    )
+    server_parser.set_defaults(handler=run_server)
 
     discover_parser = commands.add_parser("discover", help="현장 서버를 탐색해 태그 카탈로그 후보를 생성")
+    discover_parser.set_defaults(handler=run_discover)
     discover_parser.add_argument(
         "--root",
         type=_node_id,
@@ -95,20 +127,34 @@ def parse_args() -> argparse.Namespace:
     )
     discover_parser.add_argument("--dry-run", action="store_true", help="결과만 출력하고 파일은 저장하지 않음")
 
+    validate_parser = commands.add_parser("validate", help="카탈로그를 검증 (오류가 있으면 종료 코드 1)")
+    validate_parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=config.catalog_path,
+        help=f"카탈로그 파일 경로 (기본값: {config.catalog_path})",
+    )
+    validate_parser.set_defaults(handler=run_validate)
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     setup_logging()
-    command = args.command or "run"
-    logger.info("middleware_gateway_opc_ua 시작 (command=%s, endpoint=%s)", command, config.opcua.endpoint)
+    logger.info("middleware_gateway_opc_ua 시작 (command=%s)", args.command)
+    exit_code = 0
     try:
-        asyncio.run(discover(args) if command == "discover" else run())
+        exit_code = asyncio.run(args.handler(args)) or 0
     except KeyboardInterrupt:
         pass
+    except CatalogError as e:
+        logger.error("카탈로그 오류: %s", e)
+        exit_code = 1
     finally:
         logger.info("middleware_gateway_opc_ua 종료")
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
