@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,7 +9,9 @@ from typing import Any
 from asyncua import Node, ua
 from asyncua.common.subscription import DataChangeNotif
 
-logger = logging.getLogger(__name__)
+from utils.log_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)

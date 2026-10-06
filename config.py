@@ -83,6 +83,7 @@ def _get_path(key: str) -> Path | None:
 
 @dataclass(frozen=True)
 class OpcUaConfig:
+    server_id: str
     endpoint: str
     client_name: str
     application_uri: str
@@ -118,11 +119,13 @@ class OpcUaConfig:
 class AppConfig:
     base_dir: Path
     log_level: str
+    catalog_path: Path
     opcua: OpcUaConfig
 
 
 def load_config() -> AppConfig:
     opcua = OpcUaConfig(
+        server_id=_get_str("OPCUA_SERVER_ID", "default"),
         endpoint=_get_str("OPCUA_ENDPOINT", "opc.tcp://localhost:4840"),
         client_name=_get_str("OPCUA_CLIENT_NAME", "middleware_gateway_opc_ua"),
         application_uri=_get_str("OPCUA_APPLICATION_URI", "urn:middleware:gateway:opcua:client"),
@@ -153,6 +156,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         base_dir=BASE_DIR,
         log_level=_get_str("LOG_LEVEL", "INFO").upper(),
+        catalog_path=_get_path("CATALOG_PATH") or BASE_DIR / "catalog" / "tags.yaml",
         opcua=opcua,
     )
 

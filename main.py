@@ -1,28 +1,16 @@
+import argparse
 import asyncio
-import logging
+from pathlib import Path
+
+from asyncua import ua
 
 from config import config
+from core.catalog import load_catalog, save_catalog
 from core.client.opc_ua import DataChange, OpcUaClient
+from core.discovery import DiscoveryService, log_report
+from utils.log_setup import get_logger, setup_logging
 
-logger = logging.getLogger("main")
-
-
-class _PublishConnectionErrorFilter(logging.Filter):
-    """재연결 대기 중 asyncua publish 루프가 매초 남기는 ConnectionError 트레이스백을 제외한다."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if record.exc_info and isinstance(record.exc_info[1], ConnectionError):
-            return not record.getMessage().startswith("Publish iteration crashed")
-        return True
-
-
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=config.log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    )
-    logging.getLogger("asyncua").setLevel(logging.WARNING)
-    logging.getLogger("asyncua.client.ua_session.UaSession").addFilter(_PublishConnectionErrorFilter())
+logger = get_logger("main")
 
 
 async def on_data_change(change: DataChange) -> None:
@@ -52,11 +40,71 @@ async def run() -> None:
         await asyncio.Event().wait()
 
 
-def main() -> None:
-    setup_logging()
-    logger.info("middleware_gateway_opc_ua 시작 (endpoint=%s)", config.opcua.endpoint)
+async def discover(args: argparse.Namespace) -> None:
+    catalog_path: Path = args.output
+    catalog = load_catalog(catalog_path)
+
+    async with OpcUaClient() as client:
+        try:
+            report = await DiscoveryService(client, config.opcua).discover(
+                catalog,
+                root=args.root,
+                max_depth=args.max_depth,
+                max_nodes=args.max_nodes,
+            )
+        except ValueError as e:
+            logger.error("탐색 실패: %s", e)
+            return
+
+    log_report(report)
+    if args.dry_run:
+        logger.info("--dry-run: 카탈로그 파일을 저장하지 않았습니다.")
+    elif report.added:
+        save_catalog(catalog, catalog_path)
+        logger.info("카탈로그 저장: %s (신규 후보 %d개 추가)", catalog_path, len(report.added))
+    else:
+        logger.info("추가할 신규 태그가 없어 카탈로그를 변경하지 않았습니다.")
+
+
+def _node_id(text: str) -> ua.NodeId:
     try:
-        asyncio.run(run())
+        return ua.NodeId.from_string(text)
+    except Exception as e:
+        raise argparse.ArgumentTypeError(f"올바른 NodeId 형식이 아닙니다: {text!r}") from e
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="OPC-UA middleware gateway")
+    commands = parser.add_subparsers(dest="command")
+
+    commands.add_parser("run", help="게이트웨이 실행 (기본값)")
+
+    discover_parser = commands.add_parser("discover", help="현장 서버를 탐색해 태그 카탈로그 후보를 생성")
+    discover_parser.add_argument(
+        "--root",
+        type=_node_id,
+        help="탐색 시작 NodeId (기본값: Objects 폴더). 예) ns=2;s=Line01",
+    )
+    discover_parser.add_argument("--max-depth", type=int, default=10, help="최대 탐색 깊이 (기본값: 10)")
+    discover_parser.add_argument("--max-nodes", type=int, default=50_000, help="최대 탐색 노드 수 (기본값: 50000)")
+    discover_parser.add_argument(
+        "--output",
+        type=Path,
+        default=config.catalog_path,
+        help=f"카탈로그 파일 경로 (기본값: {config.catalog_path})",
+    )
+    discover_parser.add_argument("--dry-run", action="store_true", help="결과만 출력하고 파일은 저장하지 않음")
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    setup_logging()
+    command = args.command or "run"
+    logger.info("middleware_gateway_opc_ua 시작 (command=%s, endpoint=%s)", command, config.opcua.endpoint)
+    try:
+        asyncio.run(discover(args) if command == "discover" else run())
     except KeyboardInterrupt:
         pass
     finally:

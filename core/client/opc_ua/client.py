@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -11,8 +10,9 @@ from asyncua.common.subscription import Subscription
 
 from config import OpcUaConfig, config
 from core.client.opc_ua.handler import DataChangeCallback, SubscriptionHandler
+from utils.log_setup import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OpcUaClientError(Exception):
